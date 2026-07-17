@@ -55,7 +55,7 @@ jobs:
               "slug": "myparcel-asia",
               "version": "${{ env.VERSION }}",
               "author": "<a href='https://myparcelasia.com'>MyParcel Asia</a>",
-              "download_url": "https://github.com/myparcelasia/wc-myparce-asia/releases/latest/download/wc-myparcel-asia.zip",
+              "download_url": "https://app.myparcelasia.com/plugin/myparcel-asia-${{ env.VERSION }}.zip",
               "requires": "5.0",
               "tested": "6.5",
               "sections": {
@@ -69,19 +69,20 @@ jobs:
       - name: Create Zip Archive
         run: |
           mkdir -p build/myparcel-asia
-          rsync -av --exclude='.git' --exclude='.github' --exclude='build' --exclude='wc-myparcel-asia.json' --exclude='*.zip' ./ build/myparcel-asia/
+          rsync -av --exclude='.git' --exclude='.github' --exclude='build' --exclude='release' --exclude='wc-myparcel-asia.json' --exclude='*.zip' ./ build/myparcel-asia/
           cd build
-          zip -r ../wc-myparcel-asia.zip myparcel-asia/
+          zip -r ../myparcel-asia-${{ env.VERSION }}.zip myparcel-asia/
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ env.VERSION }}
-          name: Release v${{ env.VERSION }}
-          files: |
-            wc-myparcel-asia.json
-            wc-myparcel-asia.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit to Release Directory
+        run: |
+          mkdir -p release
+          # Clean previous releases in the directory
+          rm -f release/*.zip release/*.json
+          mv wc-myparcel-asia.json release/
+          mv myparcel-asia-${{ env.VERSION }}.zip release/
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add release/
+          git commit -m "chore: update release files [skip ci]" || echo "No changes to commit"
+          git push
