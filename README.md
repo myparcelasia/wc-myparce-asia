@@ -12,10 +12,4 @@ The MyParcel Asia WooCommerce plugin seamlessly integrates your WooCommerce stor
 
 ## Changelog
 
-### [1.0.1] - 2026-07-17
-- Fix: Chosen courier at checkout is now reflected correctly in Order Page and To Process page.
-
-### [1.0.0] - Initial Release
-- Core shipping calculation and WooCommerce integration
-- Batch AWB creation
-- Single AWB creation
+[Click here to read changelog](CHANGELOG.md)
