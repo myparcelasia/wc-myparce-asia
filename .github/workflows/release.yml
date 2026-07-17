@@ -1,0 +1,87 @@
+name: Release Plugin
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Extract Version
+        id: version
+        run: |
+          VERSION=$(grep -E '^\s*\*\s*Version:' myparcel-asia.php | awk '{print $3}' | tr -d '\r')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Extracted version: $VERSION"
+
+      - name: Extract Changelog
+        id: changelog
+        run: |
+          # Extract the changelog block for the latest version
+          CHANGELOG=$(awk -v ver="[${{ env.VERSION }}]" '
+            $0 ~ "^## " ver {flag=1; next}
+            /^## \[/ {if (flag) exit}
+            flag {print}
+          ' CHANGELOG.md | sed '/^[[:space:]]*$/d')
+          
+          # Convert markdown list to HTML ul/li for the JSON output
+          HTML_CHANGELOG="<h4>${{ env.VERSION }}</h4><ul>"
+          while read -r line; do
+            if [[ $line == -* ]]; then
+              item=$(echo "$line" | sed 's/^- //')
+              HTML_CHANGELOG="${HTML_CHANGELOG}<li>${item}</li>"
+            elif [[ -n $line ]]; then
+              HTML_CHANGELOG="${HTML_CHANGELOG}<strong>${line//### /}</strong><br>"
+            fi
+          done <<< "$CHANGELOG"
+          HTML_CHANGELOG="${HTML_CHANGELOG}</ul>"
+          
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          echo "$HTML_CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Generate JSON
+        run: |
+          cat << 'EOF' > wc-myparcel-asia.json
+          {
+              "name": "MyParcel Asia",
+              "slug": "myparcel-asia",
+              "version": "${{ env.VERSION }}",
+              "author": "<a href='https://myparcelasia.com'>MyParcel Asia</a>",
+              "download_url": "https://github.com/myparcelasia/wc-myparce-asia/releases/latest/download/wc-myparcel-asia.zip",
+              "requires": "5.0",
+              "tested": "6.5",
+              "sections": {
+                  "description": "Shipping and fulfilment plugin by MyParcel Asia.",
+                  "changelog": ""
+              }
+          }
+          EOF
+          jq --arg changelog "${{ env.CHANGELOG }}" '.sections.changelog = $changelog' wc-myparcel-asia.json > tmp.json && mv tmp.json wc-myparcel-asia.json
+
+      - name: Create Zip Archive
+        run: |
+          mkdir -p build/myparcel-asia
+          rsync -av --exclude='.git' --exclude='.github' --exclude='build' --exclude='wc-myparcel-asia.json' --exclude='*.zip' ./ build/myparcel-asia/
+          cd build
+          zip -r ../wc-myparcel-asia.zip myparcel-asia/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
+          files: |
+            wc-myparcel-asia.json
+            wc-myparcel-asia.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
