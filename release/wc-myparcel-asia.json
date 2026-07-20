@@ -3,7 +3,7 @@
   "slug": "myparcel-asia",
   "version": "1.0.2",
   "author": "<a href='https://myparcelasia.com'>MyParcel Asia</a>",
-  "download_url": "https://app.myparcelasia.com/plugin/myparcel-asia-1.0.2.zip",
+  "download_url": "https://github.com/myparcelasia/wc-myparce-asia/raw/refs/heads/main/release/myparcel-asia-1.0.2.zip",
   "requires": "5.0",
   "tested": "6.5",
   "sections": {
