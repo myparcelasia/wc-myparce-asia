@@ -3,7 +3,7 @@
  * Plugin Name: MYPARCEL ASIA
  * Plugin URI: https://myparcelasia.com
  * Description: WooCommerce fulfillment plugin by MYPARCEL ASIA.
- * Version: 1.0.2
+ * Version: 1.0.3
  * Author: MYPARCEL ASIA
  * Author URI: https://myparcelasia.com
  * License: GPL2
@@ -2507,8 +2507,12 @@ class MyParcel_Asia_Plugin
             } elseif (!empty($sync_result['status'])) {
                 echo '<div class="notice notice-success is-dismissible" style="margin-left:0;margin-right:0;"><p>' . esc_html__('Settings saved and connection verified successfully!', 'myparcel-asia') . '</p></div>';
             } else {
-                $msg = !empty($sync_result['message']) ? $sync_result['message'] : esc_html__('Connection failed', 'myparcel-asia');
-                echo '<div class="notice notice-error is-dismissible" style="margin-left:0;margin-right:0;"><p>' . sprintf(esc_html__('Connection failed: %s', 'myparcel-asia'), esc_html($msg)) . '</p></div>';
+                if (!empty($sync_result['message'])) {
+                    $msg = sprintf(esc_html__('Connection failed: %s', 'myparcel-asia'), esc_html($sync_result['message']));
+                } else {
+                    $msg = esc_html__('Connection failed: Unknown error. Please check your API key or contact support.', 'myparcel-asia');
+                }
+                echo '<div class="notice notice-error is-dismissible" style="margin-left:0;margin-right:0;"><p>' . $msg . '</p></div>';
             }
         }
 

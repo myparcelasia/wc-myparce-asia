@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.3] - 2026-07-20
+### Fixed
+- Fix: Prevent duplicated "Connection failed" message when API returns an empty error message.
+
+
 ## [1.0.2] - 2026-07-17
 ### Changed
 - Change updater to new file location
