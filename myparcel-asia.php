@@ -3,7 +3,7 @@
  * Plugin Name: MYPARCEL ASIA
  * Plugin URI: https://myparcelasia.com
  * Description: WooCommerce fulfillment plugin by MYPARCEL ASIA.
- * Version: 1.0.4
+ * Version: 1.0.5
  * Author: MYPARCEL ASIA
  * Author URI: https://myparcelasia.com
  * License: GPL2
@@ -79,6 +79,31 @@ class MyParcel_Asia_Plugin
         }
         // Normalize code format if needed (e.g. poslaju/jnt/dhle)
         return 'https://app.myparcelasia.com/assets/img/vendor_logo/' . esc_attr($code) . '.png';
+    }
+
+    /**
+     * Get legacy data from previous plugin (mpawoo) stored on shipping method items.
+     *
+     * Returns array with keys: tracking_no, code, weight, price.
+     */
+    public function get_legacy_shipping_item_data($order)
+    {
+        $legacy = array('tracking_no' => '', 'code' => '', 'weight' => '', 'price' => '');
+        foreach ($order->get_shipping_methods() as $method) {
+            foreach ($method->get_meta_data() as $row) {
+                $key = str_replace('mpa_', '', $row->key);
+                if (in_array($key, array('tracking_no', 'code', 'weight'), true)) {
+                    if (empty($legacy[$key])) {
+                        $legacy[$key] = $row->value;
+                    }
+                }
+            }
+            $total = $method->get_total();
+            if (empty($legacy['price']) && $total > 0) {
+                $legacy['price'] = $total;
+            }
+        }
+        return $legacy;
     }
 
     /**
@@ -164,6 +189,10 @@ class MyParcel_Asia_Plugin
         }
 
         $selected_courier = $order->get_meta('_mpa_selected_courier', true);
+        if (empty($selected_courier)) {
+            $legacy = $this->get_legacy_shipping_item_data($order);
+            $selected_courier = !empty($legacy['code']) ? $legacy['code'] : '';
+        }
         $courier_key = !empty($selected_courier) ? $selected_courier : (isset($resolved_lane['courier']) ? $resolved_lane['courier'] : 'none');
 
         if ('none' === $courier_key) {
@@ -406,6 +435,10 @@ class MyParcel_Asia_Plugin
 
         $lane = $get_lane_match($receiver_country_code, $state_code);
         $selected_courier = $order->get_meta('_mpa_selected_courier', true);
+        if (empty($selected_courier)) {
+            $legacy = $this->get_legacy_shipping_item_data($order);
+            $selected_courier = !empty($legacy['code']) ? $legacy['code'] : '';
+        }
         $courier_key = !empty($selected_courier) ? $selected_courier : (isset($lane['courier']) ? $lane['courier'] : 'none');
 
         if ('none' === $courier_key) {
@@ -1605,7 +1638,7 @@ class MyParcel_Asia_Plugin
             }
 
             $total_orders = count($filtered_ids);
-            $limit = 10;
+            $limit = 50;
             $total_pages = ceil($total_orders / $limit);
             $offset = ($paged - 1) * $limit;
             $paginated_ids = array_slice($filtered_ids, $offset, $limit);
@@ -1853,6 +1886,10 @@ class MyParcel_Asia_Plugin
                             // Match lane settings
                             $lane = $get_lane_match($country_code, $state_code);
                             $selected_courier = $order->get_meta('_mpa_selected_courier', true);
+                            if (empty($selected_courier)) {
+                                $legacy = $this->get_legacy_shipping_item_data($order);
+                                $selected_courier = !empty($legacy['code']) ? $legacy['code'] : '';
+                            }
                             $courier_key = !empty($selected_courier) ? $selected_courier : (isset($lane['courier']) ? $lane['courier'] : 'none');
 
                             $is_domestic = ('MY' === strtoupper($country_code));
@@ -1887,7 +1924,7 @@ class MyParcel_Asia_Plugin
                                 }
                             }
                             ?>
-                            <?php $row_index = (($paged - 1) * 10) + $row_count; ?>
+                            <?php $row_index = (($paged - 1) * 50) + $row_count; ?>
                             <tr>
                                 <td style="text-align:center; font-weight: 600; color: #64748b;"><?php echo $row_index; ?></td>
                                 <td>
@@ -1949,6 +1986,10 @@ class MyParcel_Asia_Plugin
                                     <?php endif; ?>
                                     <?php
                                     $batch_tracking = $order->get_meta('_mpa_tracking_no', true);
+                                    if (empty($batch_tracking)) {
+                                        $legacy = $this->get_legacy_shipping_item_data($order);
+                                        $batch_tracking = !empty($legacy['tracking_no']) ? $legacy['tracking_no'] : '';
+                                    }
                                     if (!empty($batch_tracking) && 'N/A' !== $batch_tracking):
                                         ?>
                                         <div
@@ -1961,6 +2002,10 @@ class MyParcel_Asia_Plugin
                                     style="font-weight: 700; color: <?php echo 'none' === $courier_key ? '#cbd5e1' : '#0f172a'; ?>;">
                                     <?php
                                     $actual_price = $order->get_meta('_mpa_actual_price', true);
+                                    if ('' === $actual_price) {
+                                        $legacy = $this->get_legacy_shipping_item_data($order);
+                                        $actual_price = '' !== $legacy['price'] ? $legacy['price'] : '';
+                                    }
                                     if ('' !== $actual_price && !empty($batch_tracking) && 'N/A' !== $batch_tracking):
                                         echo 'RM ' . esc_html(number_format(floatval($actual_price), 2));
                                     elseif ('none' === $courier_key):
@@ -3812,6 +3857,10 @@ class MyParcel_Asia_Plugin
 
         // Selected courier override
         $selected_courier = $order->get_meta('_mpa_selected_courier', true);
+        if (empty($selected_courier)) {
+            $legacy = $this->get_legacy_shipping_item_data($order);
+            $selected_courier = !empty($legacy['code']) ? $legacy['code'] : '';
+        }
         $active_courier_code = !empty($selected_courier) ? $selected_courier : (isset($lane_matched['courier']) ? $lane_matched['courier'] : 'none');
 
         if (!empty($selected_courier)) {
@@ -3843,7 +3892,10 @@ class MyParcel_Asia_Plugin
 
         $tracking_no = $order->get_meta('_mpa_tracking_no', true);
         if (empty($tracking_no)) {
-            $tracking_no = 'N/A';
+            $legacy = $this->get_legacy_shipping_item_data($order);
+            $tracking_no = !empty($legacy['tracking_no']) ? $legacy['tracking_no'] : 'N/A';
+        } else {
+            $tracking_no = 'N/A' === $tracking_no ? 'N/A' : $tracking_no;
         }
         ?>
         <div class="mpa-metabox-wrapper" style="font-family:'Inter',sans-serif; color:#334155; line-height: 1.4;">
@@ -3929,6 +3981,10 @@ class MyParcel_Asia_Plugin
                 <span id="mpa-sidebar-price" class="mpa-metabox-value">
                     <?php
                     $actual_price = $order->get_meta('_mpa_actual_price', true);
+                    if ('' === $actual_price) {
+                        $legacy = $this->get_legacy_shipping_item_data($order);
+                        $actual_price = '' !== $legacy['price'] ? $legacy['price'] : '';
+                    }
                     if ('' !== $actual_price && 'N/A' !== $tracking_no) {
                         echo 'RM ' . esc_html(number_format(floatval($actual_price), 2));
                     } else {
@@ -4416,7 +4472,7 @@ class MyParcel_Asia_Plugin
 
             $search = isset($_GET['mpa_search']) ? sanitize_text_field($_GET['mpa_search']) : '';
             $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
-            $limit = 10;
+            $limit = 50;
 
             $all_batch_order_ids = $batch['orders'];
             if (!empty($search)) {
@@ -4716,8 +4772,12 @@ class MyParcel_Asia_Plugin
                             }
 
                             $tracking_no = $order->get_meta('_mpa_tracking_no', true);
+                            if (empty($tracking_no)) {
+                                $legacy = $this->get_legacy_shipping_item_data($order);
+                                $tracking_no = !empty($legacy['tracking_no']) ? $legacy['tracking_no'] : '';
+                            }
                             ?>
-                            <?php $row_index = (($paged - 1) * 10) + $row_count; ?>
+                            <?php $row_index = (($paged - 1) * 50) + $row_count; ?>
                             <tr>
                                 <td style="text-align:center; font-weight: 600; color: #64748b;"><?php echo $row_index; ?></td>
                                 <td>
@@ -4766,6 +4826,10 @@ class MyParcel_Asia_Plugin
                                 <td style="text-align:right; font-weight:700;">
                                     <?php
                                     $actual_price = $order->get_meta('_mpa_actual_price', true);
+                                    if ('' === $actual_price) {
+                                        $legacy = $this->get_legacy_shipping_item_data($order);
+                                        $actual_price = '' !== $legacy['price'] ? $legacy['price'] : '';
+                                    }
                                     if ('' !== $actual_price) {
                                         echo 'RM ' . esc_html(number_format(floatval($actual_price), 2));
                                     } elseif ($res['success']) {
@@ -5039,7 +5103,7 @@ class MyParcel_Asia_Plugin
             // List View
             $reversed_batches = array_reverse($batches);
             $total_batches = count($reversed_batches);
-            $limit = 10;
+            $limit = 50;
             $total_pages = ceil($total_batches / $limit);
             $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
             $offset = ($paged - 1) * $limit;

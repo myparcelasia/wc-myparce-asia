@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.5] - 2026-07-23
+### Added
+- Add backward compatibility with previous plugin (mpawoo): MYPARCEL ASIA metabox, To Process, and batch pages now reflect legacy shipping item data (tracking number, courier code, shipping price).
+- Increase pagination from 10 to 50 rows per page across all list views.
+
 ## [1.0.4] - 2026-07-23
 ### Added
 - Add search by customer name, pagination, and dynamic `#` row numbering column to "To Process", "Manage Batches", and "Manage Batch (Create AWB)" tables.
