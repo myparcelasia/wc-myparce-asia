@@ -3,7 +3,7 @@
  * Plugin Name: MYPARCEL ASIA
  * Plugin URI: https://myparcelasia.com
  * Description: WooCommerce fulfillment plugin by MYPARCEL ASIA.
- * Version: 1.0.5
+ * Version: 1.0.7
  * Author: MYPARCEL ASIA
  * Author URI: https://myparcelasia.com
  * License: GPL2
@@ -233,14 +233,14 @@ class MyParcel_Asia_Plugin
                 (strpos(strtolower($courier_key), $provider) !== false)
             ) {
 
-                $matched_price = floatval(isset($price_item['exclusive_price']) ? $price_item['exclusive_price'] : $price_item['normal_price']);
+                $matched_price = mpa_calculate_item_price($price_item);
                 break;
             }
         }
 
         if ($matched_price === null) {
             $first_price = reset($data['data']['prices']);
-            $matched_price = floatval(isset($first_price['exclusive_price']) ? $first_price['exclusive_price'] : $first_price['normal_price']);
+            $matched_price = mpa_calculate_item_price($first_price);
         }
 
 
@@ -5452,6 +5452,19 @@ class MyParcel_Asia_Plugin
     }
 }
 
+/**
+ * Calculate price including SST from an API price item.
+ *
+ * @param array $price_item Single price entry from /check_price response.
+ * @return float Price = effective_price + sst_price.
+ */
+function mpa_calculate_item_price($price_item)
+{
+    $effective = isset($price_item['effective_price']) ? floatval($price_item['effective_price']) : (isset($price_item['exclusive_price']) ? floatval($price_item['exclusive_price']) : 0);
+    $sst = isset($price_item['sst_price']) ? floatval($price_item['sst_price']) : 0;
+    return $effective + $sst;
+}
+
 function mpa_register_shipping_method_class()
 {
     if (class_exists('WC_Shipping_Method') && !class_exists('MyParcel_Asia_Shipping_Method')) {
@@ -5630,14 +5643,14 @@ function mpa_register_shipping_method_class()
                             (strpos(strtolower($courier_key), $provider) !== false)
                         ) {
 
-                            $matched_price = floatval(isset($price_item['exclusive_price']) ? $price_item['exclusive_price'] : $price_item['normal_price']);
+                            $matched_price = mpa_calculate_item_price($price_item);
                             break;
                         }
                     }
 
                     if ($matched_price === null) {
                         $first_price = reset($prices);
-                        $matched_price = floatval(isset($first_price['exclusive_price']) ? $first_price['exclusive_price'] : $first_price['normal_price']);
+                        $matched_price = mpa_calculate_item_price($first_price);
                     }
 
                     if ($matched_price !== null) {
@@ -5755,7 +5768,7 @@ function mpa_register_shipping_method_class()
                                 (strpos(strtolower($courier_key), $provider) !== false)
                             ) {
 
-                                $matched_price = floatval(isset($price_item['exclusive_price']) ? $price_item['exclusive_price'] : $price_item['normal_price']);
+                                $matched_price = mpa_calculate_item_price($price_item);
                                 break;
                             }
                         }

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.7] - 2026-07-23
+### Fixed
+- Fix AWB price missing SST value: now calculated as effective_price + sst_price from API response.
+
+## [1.0.6] - 2026-07-23
+### Fixed
+- Fix checkout page not showing shipping options with custom themes: register shipping method natively with WooCommerce and auto-add to all shipping zones.
+- Replace aggressive zone cleanup with automatic zone setup to ensure shipping method is always available.
+
 ## [1.0.5] - 2026-07-23
 ### Added
 - Add backward compatibility with previous plugin (mpawoo): MYPARCEL ASIA metabox, To Process, and batch pages now reflect legacy shipping item data (tracking number, courier code, shipping price).
