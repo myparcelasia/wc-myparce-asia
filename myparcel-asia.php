@@ -26,7 +26,7 @@ class MyParcel_Asia_Plugin
         add_action('admin_menu', array($this, 'register_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_styles'));
         add_action('admin_init', array($this, 'handle_url_api_key_capture'));
-        add_action('admin_init', array($this, 'clean_myparcel_asia_shipping_from_zones'));
+        add_action('admin_init', array($this, 'ensure_shipping_method_in_zones'));
         add_action('wp_ajax_mpa_get_order_shipping_price', array($this, 'ajax_get_order_shipping_price'));
         add_action('add_meta_boxes', array($this, 'add_order_metabox'));
         add_action('wp_ajax_mpa_save_order_courier', array($this, 'ajax_save_order_courier'));
@@ -3975,7 +3975,19 @@ class MyParcel_Asia_Plugin
                 </div>
             </div>
 
-            <!-- AWB Price -->
+            <!-- Shipping Price (what customer paid) -->
+            <div class="mpa-metabox-row">
+                <span class="mpa-metabox-label"><?php esc_html_e('Shipping Price', 'myparcel-asia'); ?></span>
+                <span class="mpa-metabox-value">
+                    <?php
+                    $shipping_total = $order->get_shipping_total();
+                    $shipping_tax = $order->get_shipping_tax();
+                    echo 'RM ' . esc_html(number_format(floatval($shipping_total + $shipping_tax), 2));
+                    ?>
+                </span>
+            </div>
+
+            <!-- AWB Price (actual cost) -->
             <div class="mpa-metabox-row">
                 <span class="mpa-metabox-label"><?php esc_html_e('AWB Price', 'myparcel-asia'); ?></span>
                 <span id="mpa-sidebar-price" class="mpa-metabox-value">
@@ -5342,11 +5354,15 @@ class MyParcel_Asia_Plugin
             return $new_rates;
         }
 
+        error_log('MPA Checkout: MyParcel_Asia_Shipping_Method returned no rates. checkout_option=' . $checkout_price_option);
+
         $default_price_option = get_option('mpa_default_shipping_price', 'free');
         if ('no-service' === $default_price_option) {
+            error_log('MPA Checkout: default_price_option is no-service, blocking checkout.');
             return array(); // Block checkout
         }
 
+        error_log('MPA Checkout: returning original WooCommerce rates as fallback.');
         return $rates;
     }
 
@@ -5400,12 +5416,39 @@ class MyParcel_Asia_Plugin
         }
     }
     /**
-     * Clean up and remove MYPARCEL ASIA shipping method from all WooCommerce shipping zones in database
+     * Ensure MYPARCEL ASIA shipping method exists in all WooCommerce shipping zones
      */
-    public function clean_myparcel_asia_shipping_from_zones()
+    public function ensure_shipping_method_in_zones()
     {
-        global $wpdb;
-        $wpdb->query("DELETE FROM {$wpdb->prefix}woocommerce_shipping_zone_methods WHERE method_id = 'myparcel_asia_shipping'");
+        if (!class_exists('WC_Shipping_Zones')) {
+            return;
+        }
+        $method_id = 'myparcel_asia_shipping';
+        $zones = WC_Shipping_Zones::get_zones();
+        // Also check the "Rest of the World" zone (zone ID 0)
+        $zones[0] = WC_Shipping_Zones::get_zone(0);
+
+        foreach ($zones as $zone) {
+            if (is_a($zone, 'WC_Shipping_Zone')) {
+                $zone_obj = $zone;
+            } elseif (is_array($zone) && isset($zone['zone_id'])) {
+                $zone_obj = WC_Shipping_Zones::get_zone($zone['zone_id']);
+            } else {
+                continue;
+            }
+
+            $shipping_methods = $zone_obj->get_shipping_methods();
+            $found = false;
+            foreach ($shipping_methods as $method) {
+                if ($method->id === $method_id) {
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                $zone_obj->add_shipping_method($method_id);
+            }
+        }
     }
 }
 
@@ -5571,6 +5614,7 @@ function mpa_register_shipping_method_class()
 
                     // this is it
                     if (is_wp_error($data) || !isset($data['status']) || !$data['status'] || empty($data['data']['prices'])) {
+                        error_log('MPA Checkout: API /check_price returned no valid prices. Data: ' . print_r($data, true));
                         $this->apply_default_shipping_fallback($default_price_option, $default_fixed_price);
                         return;
                     }
@@ -5770,8 +5814,20 @@ function mpa_register_shipping_method_class()
     }
 }
 
+/**
+ * Register MyParcel_Asia_Shipping_Method with WooCommerce
+ */
+function mpa_add_shipping_method($methods)
+{
+    if (class_exists('MyParcel_Asia_Shipping_Method')) {
+        $methods['myparcel_asia_shipping'] = 'MyParcel_Asia_Shipping_Method';
+    }
+    return $methods;
+}
+
 // Call helper to define class on plugins_loaded after WC loads
 add_action('plugins_loaded', 'mpa_register_shipping_method_class', 20);
+add_filter('woocommerce_shipping_methods', 'mpa_add_shipping_method', 20);
 
 class MyParcel_Asia_Updater
 {
