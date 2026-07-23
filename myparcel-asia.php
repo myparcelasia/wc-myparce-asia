@@ -1383,6 +1383,62 @@ class MyParcel_Asia_Plugin
     }
 
     /**
+     * Check if an order has any shipment or tracking number details (e.g. from other shipping/tracking plugins).
+     *
+     * @param WC_Order $order WooCommerce Order object
+     * @return bool True if tracking details exist
+     */
+    private function order_has_tracking_details($order)
+    {
+        if (!$order) {
+            return false;
+        }
+
+        // Check order meta keys for standard tracking numbers
+        $order_tracking_keys = array(
+            '_mpa_tracking_no',
+            '_tracking_number',
+            '_tracking_no',
+            'tracking_no',
+            'tracking_number',
+        );
+        foreach ($order_tracking_keys as $key) {
+            $val = $order->get_meta($key, true);
+            if (!empty($val) && 'N/A' !== $val) {
+                return true;
+            }
+        }
+
+        // Check _shipment_tracking_items (WooCommerce Shipment Tracking)
+        $shipment_items = $order->get_meta('_shipment_tracking_items', true);
+        if (is_array($shipment_items) && !empty($shipment_items)) {
+            foreach ($shipment_items as $item) {
+                if (!empty($item['tracking_number'])) {
+                    return true;
+                }
+            }
+        }
+
+        // Check shipping items metadata for tracking number
+        foreach ($order->get_items('shipping') as $shipping_item) {
+            $shipping_tracking_keys = array(
+                'tracking_no',
+                'tracking_number',
+                '_tracking_no',
+                '_tracking_number',
+            );
+            foreach ($shipping_tracking_keys as $key) {
+                $val = $shipping_item->get_meta($key, true);
+                if (!empty($val) && 'N/A' !== $val) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Render the Manage Batch page
      */
     public function render_manage_batch()
@@ -1512,9 +1568,8 @@ class MyParcel_Asia_Plugin
         if (class_exists('WooCommerce')) {
             $query_args = array(
                 'status' => array('wc-processing'),
-                'limit' => 10,
-                'page' => $paged,
-                'paginate' => true,
+                'limit' => -1,
+                'return' => 'ids',
                 'meta_query' => array(
                     'relation' => 'OR',
                     array(
@@ -1538,10 +1593,30 @@ class MyParcel_Asia_Plugin
                 }
             }
 
-            $results = wc_get_orders($query_args);
-            $orders = $results->orders;
-            $total_pages = $results->max_num_pages;
-            $total_orders = $results->total;
+            $candidate_ids = wc_get_orders($query_args);
+
+            // Filter out orders that have tracking details
+            $filtered_ids = array();
+            foreach ($candidate_ids as $order_id) {
+                $order = wc_get_order($order_id);
+                if ($order && !$this->order_has_tracking_details($order)) {
+                    $filtered_ids[] = $order_id;
+                }
+            }
+
+            $total_orders = count($filtered_ids);
+            $limit = 10;
+            $total_pages = ceil($total_orders / $limit);
+            $offset = ($paged - 1) * $limit;
+            $paginated_ids = array_slice($filtered_ids, $offset, $limit);
+
+            $orders = array();
+            foreach ($paginated_ids as $order_id) {
+                $order = wc_get_order($order_id);
+                if ($order) {
+                    $orders[] = $order;
+                }
+            }
         }
         ?>
         <div class="wrap mpa-batch-wrap">
