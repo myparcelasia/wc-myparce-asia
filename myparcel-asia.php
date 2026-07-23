@@ -3,7 +3,7 @@
  * Plugin Name: MYPARCEL ASIA
  * Plugin URI: https://myparcelasia.com
  * Description: WooCommerce fulfillment plugin by MYPARCEL ASIA.
- * Version: 1.0.3
+ * Version: 1.0.4
  * Author: MYPARCEL ASIA
  * Author URI: https://myparcelasia.com
  * License: GPL2
@@ -1345,6 +1345,44 @@ class MyParcel_Asia_Plugin
     }
 
     /**
+     * Search order IDs by customer name (billing or shipping) supporting HPOS & standard CPT.
+     *
+     * @param string $search Search term
+     * @return array Array of order IDs
+     */
+    public function search_order_ids_by_customer_name($search)
+    {
+        global $wpdb;
+        $search_like = '%' . $wpdb->esc_like(sanitize_text_field($search)) . '%';
+
+        // Check if HPOS is enabled
+        $hpos_enabled = false;
+        if (class_exists('\Automattic\WooCommerce\Utilities\OrderUtil') &&
+            method_exists('\Automattic\WooCommerce\Utilities\OrderUtil', 'custom_orders_table_usage_is_enabled')) {
+            $hpos_enabled = \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+        } else {
+            $hpos_enabled = !empty($wpdb->get_col("SHOW TABLES LIKE '{$wpdb->prefix}wc_orders'"));
+        }
+
+        if ($hpos_enabled) {
+            $sql = $wpdb->prepare(
+                "SELECT DISTINCT order_id FROM {$wpdb->prefix}wc_order_addresses 
+                 WHERE first_name LIKE %s OR last_name LIKE %s",
+                $search_like, $search_like
+            );
+            return $wpdb->get_col($sql);
+        } else {
+            $sql = $wpdb->prepare(
+                "SELECT DISTINCT post_id FROM {$wpdb->postmeta} 
+                 WHERE meta_key IN ('_billing_first_name', '_billing_last_name', '_shipping_first_name', '_shipping_last_name') 
+                 AND meta_value LIKE %s",
+                $search_like
+            );
+            return $wpdb->get_col($sql);
+        }
+    }
+
+    /**
      * Render the Manage Batch page
      */
     public function render_manage_batch()
@@ -1464,12 +1502,19 @@ class MyParcel_Asia_Plugin
             }
         };
 
-        // Fetch WooCommerce processing orders
+        // Fetch WooCommerce processing orders with search and pagination
         $orders = array();
+        $total_pages = 1;
+        $total_orders = 0;
+        $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+        $search = isset($_GET['mpa_search']) ? sanitize_text_field($_GET['mpa_search']) : '';
+
         if (class_exists('WooCommerce')) {
-            $orders = wc_get_orders(array(
+            $query_args = array(
                 'status' => array('wc-processing'),
-                'limit' => -1,
+                'limit' => 10,
+                'page' => $paged,
+                'paginate' => true,
                 'meta_query' => array(
                     'relation' => 'OR',
                     array(
@@ -1482,7 +1527,21 @@ class MyParcel_Asia_Plugin
                         'compare' => '=',
                     ),
                 ),
-            ));
+            );
+
+            if (!empty($search)) {
+                $matching_ids = $this->search_order_ids_by_customer_name($search);
+                if (!empty($matching_ids)) {
+                    $query_args['post__in'] = $matching_ids;
+                } else {
+                    $query_args['post__in'] = array(0);
+                }
+            }
+
+            $results = wc_get_orders($query_args);
+            $orders = $results->orders;
+            $total_pages = $results->max_num_pages;
+            $total_orders = $results->total;
         }
         ?>
         <div class="wrap mpa-batch-wrap">
@@ -1492,6 +1551,44 @@ class MyParcel_Asia_Plugin
                     margin: 20px 20px 0 0;
                     color: #1e293b;
                 }
+                /* Custom Pagination styles to match image */
+                .mpa-page-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 4px;
+                    text-decoration: none;
+                    font-weight: 600;
+                    font-size: 14px;
+                    box-sizing: border-box;
+                    user-select: none;
+                }
+                .mpa-page-disabled {
+                    background-color: #f1f5f9;
+                    border: 1px solid #cbd5e1;
+                    color: #94a3b8;
+                    cursor: not-allowed;
+                }
+                .mpa-page-active {
+                    background-color: #ffffff;
+                    border: 1px solid #2563eb;
+                    color: #2563eb;
+                    transition: all 0.15s ease-in-out;
+                }
+                .mpa-page-active:hover {
+                    background-color: #eff6ff;
+                    border-color: #1d4ed8;
+                    color: #1d4ed8;
+                }
+                .mpa-page-info {
+                    font-size: 14px;
+                    color: #1e293b;
+                    font-weight: 500;
+                    margin: 0 4px;
+                }
+
 
                 /* Sticky Summary Header */
                 .mpa-sticky-header {
@@ -1616,23 +1713,36 @@ class MyParcel_Asia_Plugin
             <h1 class="wp-heading-inline"><?php esc_html_e('To Process', 'myparcel-asia'); ?></h1>
             <hr class="wp-header-end">
 
-            <!-- Sticky Summary bar -->
-            <div class="mpa-sticky-header">
-                <div class="mpa-sticky-info">
-                    <div class="mpa-sticky-stat">
-                        <span class="mpa-sticky-label"><?php esc_html_e('Topup Balance', 'myparcel-asia'); ?></span>
-                        <span class="mpa-sticky-val">RM <?php echo esc_html(number_format($balance, 2)); ?></span>
+            <!-- Sticky Summary bar with Search and Stats combined -->
+            <div class="mpa-sticky-header" style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+                <!-- Left: Search Box -->
+                <form method="get" action="" style="display: flex; gap: 8px; align-items: center; margin: 0; flex: 1; max-width: 420px;">
+                    <input type="hidden" name="page" value="myparcel-asia-batch">
+                    <input type="text" name="mpa_search" value="<?php echo esc_attr($search); ?>" placeholder="<?php esc_attr_e('Search customer name...', 'myparcel-asia'); ?>" style="padding: 6px 12px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; width: 100%; max-width: 250px; height: 32px; line-height: 30px; box-sizing: border-box;">
+                    <button type="submit" class="button button-secondary" style="height: 32px; line-height: 30px;"><?php esc_html_e('Search', 'myparcel-asia'); ?></button>
+                    <?php if (!empty($search)): ?>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=myparcel-asia-batch')); ?>" class="button button-link" style="color: #ef4444; height: 32px; line-height: 32px; text-decoration: none;"><?php esc_html_e('Clear', 'myparcel-asia'); ?></a>
+                    <?php endif; ?>
+                </form>
+
+                <!-- Right: Stats & Action Button -->
+                <div style="display: flex; align-items: center; gap: 30px;">
+                    <div class="mpa-sticky-info" style="margin-bottom: 0;">
+                        <div class="mpa-sticky-stat">
+                            <span class="mpa-sticky-label"><?php esc_html_e('Topup Balance', 'myparcel-asia'); ?></span>
+                            <span class="mpa-sticky-val">RM <?php echo esc_html(number_format($balance, 2)); ?></span>
+                        </div>
+                        <div class="mpa-sticky-stat">
+                            <span class="mpa-sticky-label"><?php esc_html_e('Selected Total Price', 'myparcel-asia'); ?></span>
+                            <span class="mpa-sticky-val" id="mpa-selected-total">RM 0.00</span>
+                        </div>
+                        <div id="mpa-status-msg" style="display:none;"></div>
                     </div>
-                    <div class="mpa-sticky-stat">
-                        <span class="mpa-sticky-label"><?php esc_html_e('Selected Total Price', 'myparcel-asia'); ?></span>
-                        <span class="mpa-sticky-val" id="mpa-selected-total">RM 0.00</span>
+                    <div>
+                        <button type="button" class="button button-primary" id="mpa-btn-checkout" disabled style="height: 32px; line-height: 30px;">
+                            <?php esc_html_e('Add to Batch', 'myparcel-asia'); ?>
+                        </button>
                     </div>
-                    <div id="mpa-status-msg" style="display:none;"></div>
-                </div>
-                <div>
-                    <button type="button" class="button button-primary" id="mpa-btn-checkout" disabled>
-                        <?php esc_html_e('Add to Batch', 'myparcel-asia'); ?>
-                    </button>
                 </div>
             </div>
 
@@ -1640,6 +1750,7 @@ class MyParcel_Asia_Plugin
             <table class="mpa-batch-table">
                 <thead>
                     <tr>
+                        <th width="50" style="text-align:center;">#</th>
                         <th width="160"><?php esc_html_e('Order', 'myparcel-asia'); ?></th>
                         <th><?php esc_html_e('Shipping Details', 'myparcel-asia'); ?></th>
                         <th width="220"><?php esc_html_e('Item Details', 'myparcel-asia'); ?></th>
@@ -1653,12 +1764,13 @@ class MyParcel_Asia_Plugin
                     if (empty($orders)):
                         ?>
                         <tr>
-                            <td colspan="6" style="text-align:center; padding: 30px; color: #94a3b8;">
+                            <td colspan="7" style="text-align:center; padding: 30px; color: #94a3b8;">
                                 <?php esc_html_e('No processing or pending orders found.', 'myparcel-asia'); ?>
                             </td>
                         </tr>
                         <?php
                     else:
+                        $row_count = 1;
                         foreach ($orders as $order):
                             $country_code = $order->get_shipping_country();
                             $state_code = $order->get_shipping_state();
@@ -1700,7 +1812,9 @@ class MyParcel_Asia_Plugin
                                 }
                             }
                             ?>
+                            <?php $row_index = (($paged - 1) * 10) + $row_count; ?>
                             <tr>
+                                <td style="text-align:center; font-weight: 600; color: #64748b;"><?php echo $row_index; ?></td>
                                 <td>
                                     <a href="<?php echo esc_url(admin_url('post.php?post=' . $order->get_id() . '&action=edit')); ?>"
                                         target="_blank" style="text-decoration:none; font-weight:700;">
@@ -1797,11 +1911,50 @@ class MyParcel_Asia_Plugin
                                 </td>
                             </tr>
                             <?php
+                            $row_count++;
                         endforeach;
                     endif;
                     ?>
                 </tbody>
             </table>
+
+            <!-- Custom Pagination to match the user's mockup -->
+            <?php if ($total_orders > 0): ?>
+                <div class="mpa-pagination-container" style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-size: 14px; color: #334155; padding-right: 10px;">
+                    <span class="mpa-pagination-total" style="margin-right: auto; color: #475569; font-weight: 500; font-size: 15px;"><?php echo esc_html($total_orders); ?> <?php _e('items', 'myparcel-asia'); ?></span>
+                    
+                    <!-- First Page Button («) -->
+                    <?php if ($paged > 1): ?>
+                        <a href="<?php echo esc_url(add_query_arg('paged', 1)); ?>" class="mpa-page-btn mpa-page-active">«</a>
+                    <?php else: ?>
+                        <span class="mpa-page-btn mpa-page-disabled">«</span>
+                    <?php endif; ?>
+
+                    <!-- Previous Page Button (‹) -->
+                    <?php if ($paged > 1): ?>
+                        <a href="<?php echo esc_url(add_query_arg('paged', $paged - 1)); ?>" class="mpa-page-btn mpa-page-active">‹</a>
+                    <?php else: ?>
+                        <span class="mpa-page-btn mpa-page-disabled">‹</span>
+                    <?php endif; ?>
+
+                    <!-- Page info text (e.g. 1 of 2) -->
+                    <span class="mpa-page-info" style="font-weight: 500; color: #1e293b; padding: 0 4px;"><?php printf(__('%d of %d', 'myparcel-asia'), $paged, $total_pages); ?></span>
+
+                    <!-- Next Page Button (›) -->
+                    <?php if ($paged < $total_pages): ?>
+                        <a href="<?php echo esc_url(add_query_arg('paged', $paged + 1)); ?>" class="mpa-page-btn mpa-page-active">›</a>
+                    <?php else: ?>
+                        <span class="mpa-page-btn mpa-page-disabled">›</span>
+                    <?php endif; ?>
+
+                    <!-- Last Page Button (») -->
+                    <?php if ($paged < $total_pages): ?>
+                        <a href="<?php echo esc_url(add_query_arg('paged', $total_pages)); ?>" class="mpa-page-btn mpa-page-active">»</a>
+                    <?php else: ?>
+                        <span class="mpa-page-btn mpa-page-disabled">»</span>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
         </div>
 
         <script type="text/javascript">
@@ -3386,6 +3539,7 @@ class MyParcel_Asia_Plugin
             delete_option('mpa_login_email');
         }
 
+        return $response;
     }
 
     /**
@@ -4184,6 +4338,23 @@ class MyParcel_Asia_Plugin
         if (!empty($batch_id) && isset($batches[$batch_id])) {
             // Detail View
             $batch = $batches[$batch_id];
+
+            $search = isset($_GET['mpa_search']) ? sanitize_text_field($_GET['mpa_search']) : '';
+            $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+            $limit = 10;
+
+            $all_batch_order_ids = $batch['orders'];
+            if (!empty($search)) {
+                $search_ids = $this->search_order_ids_by_customer_name($search);
+                $filtered_order_ids = array_intersect($all_batch_order_ids, $search_ids);
+            } else {
+                $filtered_order_ids = $all_batch_order_ids;
+            }
+
+            $total_orders_in_batch = count($filtered_order_ids);
+            $total_pages = ceil($total_orders_in_batch / $limit);
+            $offset = ($paged - 1) * $limit;
+            $paginated_order_ids = array_slice($filtered_order_ids, $offset, $limit);
             ?>
             <div class="wrap mpa-batch-wrap" style="font-family: 'Inter', sans-serif; margin: 20px 20px 0 0; color: #1e293b;">
                 <style>
@@ -4252,6 +4423,44 @@ class MyParcel_Asia_Plugin
                         background-color: #f1f5f9;
                     }
 
+                    /* Custom Pagination styles to match image */
+                    .mpa-page-btn {
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 4px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 14px;
+                        box-sizing: border-box;
+                        user-select: none;
+                    }
+                    .mpa-page-disabled {
+                        background-color: #f1f5f9;
+                        border: 1px solid #cbd5e1;
+                        color: #94a3b8;
+                        cursor: not-allowed;
+                    }
+                    .mpa-page-active {
+                        background-color: #ffffff;
+                        border: 1px solid #2563eb;
+                        color: #2563eb;
+                        transition: all 0.15s ease-in-out;
+                    }
+                    .mpa-page-active:hover {
+                        background-color: #eff6ff;
+                        border-color: #1d4ed8;
+                        color: #1d4ed8;
+                    }
+                    .mpa-page-info {
+                        font-size: 14px;
+                        color: #1e293b;
+                        font-weight: 500;
+                        margin: 0 4px;
+                    }
+
                     /* Confirmation Modal Styles */
                     .mpa-modal-overlay {
                         display: none;
@@ -4317,53 +4526,66 @@ class MyParcel_Asia_Plugin
                     class="page-title-action"><?php esc_html_e('Back to List', 'myparcel-asia'); ?></a>
                 <hr class="wp-header-end">
 
-                <div class="mpa-batch-header">
-                    <div class="mpa-batch-meta-grid">
-                        <div class="mpa-meta-stat">
-                            <span class="mpa-meta-label"><?php esc_html_e('Status', 'myparcel-asia'); ?></span>
-                            <span class="mpa-meta-val"
-                                style="color: <?php echo 'completed' === $batch['status'] ? '#059669' : '#d97706'; ?>;">
-                                <?php echo esc_html(ucfirst($batch['status'])); ?>
-                            </span>
-                        </div>
-                        <div class="mpa-meta-stat">
-                            <span class="mpa-meta-label"><?php esc_html_e('Created By', 'myparcel-asia'); ?></span>
-                            <span class="mpa-meta-val"><?php echo esc_html($batch['created_by']); ?></span>
-                        </div>
-                        <div class="mpa-meta-stat">
-                            <span class="mpa-meta-label"><?php esc_html_e('Total Orders', 'myparcel-asia'); ?></span>
-                            <span class="mpa-meta-val"><?php echo esc_html($batch['total_order']); ?></span>
-                        </div>
-                        <div class="mpa-meta-stat">
-                            <span class="mpa-meta-label"><?php esc_html_e('Total Price', 'myparcel-asia'); ?></span>
-                            <span class="mpa-meta-val">RM
-                                <?php echo esc_html(number_format($batch['total_awb_price'], 2)); ?></span>
-                        </div>
-                    </div>
-
-                    <div>
-                        <?php if ('completed' === $batch['status']): ?>
-                            <?php if (!empty($batch['thermal_awb_url'])): ?>
-                                <a href="<?php echo esc_url($batch['thermal_awb_url']); ?>" target="_blank" class="button button-primary"
-                                    style="background:#059669; border-color:#059669;">
-                                    <?php esc_html_e('Download AWB', 'myparcel-asia'); ?>
-                                </a>
-                            <?php endif; ?>
-                        <?php else: ?>
-                            <?php $api_key = get_option('mpa_api_key', ''); ?>
-                            <?php if (empty($api_key)): ?>
-                                <button type="button" class="button button-primary" disabled title="<?php esc_attr_e('Please configure a valid API Key in Settings.', 'myparcel-asia'); ?>">
-                                    <?php esc_html_e('Invalid API Key', 'myparcel-asia'); ?>
-                                </button>
-                            <?php else: ?>
-                                <button type="button" class="button button-primary" id="mpa-btn-create-batch-awb">
-                                    <?php esc_html_e('Create AWB', 'myparcel-asia'); ?>
-                                </button>
-                            <?php endif; ?>
-                             <button type="button" class="button" id="mpa-btn-delete-batch" style="background:#ef4444; border-color:#ef4444; color:#ffffff;">
-                                 <?php esc_html_e('Delete Batch', 'myparcel-asia'); ?>
-                             </button>
+                <div class="mpa-batch-header" style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+                    <!-- Left: Search Box -->
+                    <form method="get" action="" style="display: flex; gap: 8px; align-items: center; margin: 0; flex: 1; max-width: 420px;">
+                        <input type="hidden" name="page" value="myparcel-asia-manage-batch">
+                        <input type="hidden" name="batch_id" value="<?php echo esc_attr($batch_id); ?>">
+                        <input type="text" name="mpa_search" value="<?php echo esc_attr($search); ?>" placeholder="<?php esc_attr_e('Search customer name...', 'myparcel-asia'); ?>" style="padding: 6px 12px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; width: 100%; max-width: 250px; height: 32px; line-height: 30px; box-sizing: border-box;">
+                        <button type="submit" class="button button-secondary" style="height: 32px; line-height: 30px;"><?php esc_html_e('Search', 'myparcel-asia'); ?></button>
+                        <?php if (!empty($search)): ?>
+                            <a href="<?php echo esc_url(admin_url('admin.php?page=myparcel-asia-manage-batch&batch_id=' . $batch_id)); ?>" class="button button-link" style="color: #ef4444; height: 32px; line-height: 32px; text-decoration: none;"><?php esc_html_e('Clear', 'myparcel-asia'); ?></a>
                         <?php endif; ?>
+                    </form>
+
+                    <!-- Right: Stats & Actions -->
+                    <div style="display: flex; align-items: center; gap: 30px;">
+                        <div class="mpa-batch-meta-grid" style="margin-bottom: 0;">
+                            <div class="mpa-meta-stat">
+                                <span class="mpa-meta-label"><?php esc_html_e('Status', 'myparcel-asia'); ?></span>
+                                <span class="mpa-meta-val"
+                                    style="color: <?php echo 'completed' === $batch['status'] ? '#059669' : '#d97706'; ?>; font-size: 15px;">
+                                    <?php echo esc_html(ucfirst($batch['status'])); ?>
+                                </span>
+                            </div>
+                            <div class="mpa-meta-stat">
+                                <span class="mpa-meta-label"><?php esc_html_e('Created By', 'myparcel-asia'); ?></span>
+                                <span class="mpa-meta-val" style="font-size: 15px;"><?php echo esc_html($batch['created_by']); ?></span>
+                            </div>
+                            <div class="mpa-meta-stat">
+                                <span class="mpa-meta-label"><?php esc_html_e('Total Orders', 'myparcel-asia'); ?></span>
+                                <span class="mpa-meta-val" style="font-size: 15px;"><?php echo esc_html($batch['total_order']); ?></span>
+                            </div>
+                            <div class="mpa-meta-stat">
+                                <span class="mpa-meta-label"><?php esc_html_e('Total Price', 'myparcel-asia'); ?></span>
+                                <span class="mpa-meta-val" style="font-size: 15px;">RM <?php echo esc_html(number_format($batch['total_awb_price'], 2)); ?></span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <?php if ('completed' === $batch['status']): ?>
+                                <?php if (!empty($batch['thermal_awb_url'])): ?>
+                                    <a href="<?php echo esc_url($batch['thermal_awb_url']); ?>" target="_blank" class="button button-primary"
+                                        style="background:#059669; border-color:#059669; height: 32px; line-height: 30px;">
+                                        <?php esc_html_e('Download AWB', 'myparcel-asia'); ?>
+                                    </a>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <?php $api_key = get_option('mpa_api_key', ''); ?>
+                                <?php if (empty($api_key)): ?>
+                                    <button type="button" class="button button-primary" disabled title="<?php esc_attr_e('Please configure a valid API Key in Settings.', 'myparcel-asia'); ?>" style="height: 32px; line-height: 30px;">
+                                        <?php esc_html_e('Invalid API Key', 'myparcel-asia'); ?>
+                                    </button>
+                                <?php else: ?>
+                                    <button type="button" class="button button-primary" id="mpa-btn-create-batch-awb" style="height: 32px; line-height: 30px;">
+                                        <?php esc_html_e('Create AWB', 'myparcel-asia'); ?>
+                                    </button>
+                                <?php endif; ?>
+                                <button type="button" class="button" id="mpa-btn-delete-batch" style="background:#ef4444; border-color:#ef4444; color:#ffffff; height: 32px; line-height: 30px;">
+                                    <?php esc_html_e('Delete Batch', 'myparcel-asia'); ?>
+                                </button>
+                            <?php endif; ?>
+                        </div>
                     </div>
                 </div>
 
@@ -4371,6 +4593,7 @@ class MyParcel_Asia_Plugin
                 <table class="mpa-batch-table">
                     <thead>
                         <tr>
+                            <th width="50" style="text-align:center;">#</th>
                             <th width="160"><?php esc_html_e('Order', 'myparcel-asia'); ?></th>
                             <th><?php esc_html_e('Shipping Details', 'myparcel-asia'); ?></th>
                             <th width="220"><?php esc_html_e('Item Details', 'myparcel-asia'); ?></th>
@@ -4380,10 +4603,19 @@ class MyParcel_Asia_Plugin
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($batch['orders'] as $order_id):
-                            $order = wc_get_order($order_id);
-                            if (!$order)
-                                continue;
+                        <?php if (empty($paginated_order_ids)): ?>
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: #94a3b8; padding: 30px;">
+                                    <?php esc_html_e('No orders found matching the search criteria.', 'myparcel-asia'); ?>
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php 
+                            $row_count = 1;
+                            foreach ($paginated_order_ids as $order_id):
+                                $order = wc_get_order($order_id);
+                                if (!$order)
+                                    continue;
 
                             $country_code = $order->get_shipping_country();
                             $state_code = $order->get_shipping_state();
@@ -4410,7 +4642,9 @@ class MyParcel_Asia_Plugin
 
                             $tracking_no = $order->get_meta('_mpa_tracking_no', true);
                             ?>
+                            <?php $row_index = (($paged - 1) * 10) + $row_count; ?>
                             <tr>
+                                <td style="text-align:center; font-weight: 600; color: #64748b;"><?php echo $row_index; ?></td>
                                 <td>
                                     <a href="<?php echo esc_url(admin_url('post.php?post=' . $order->get_id() . '&action=edit')); ?>"
                                         target="_blank" style="text-decoration:none; font-weight:700;">
@@ -4476,9 +4710,50 @@ class MyParcel_Asia_Plugin
                                     <?php endif; ?>
                                 </td>
                             </tr>
-                        <?php endforeach; ?>
+                        <?php 
+                            $row_count++;
+                        endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
+
+                <!-- Custom Pagination to match the user's mockup -->
+                <?php if ($total_orders_in_batch > 0): ?>
+                    <div class="mpa-pagination-container" style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-size: 14px; color: #334155; padding-right: 10px;">
+                        <span class="mpa-pagination-total" style="margin-right: auto; color: #475569; font-weight: 500; font-size: 15px;"><?php echo esc_html($total_orders_in_batch); ?> <?php _e('items', 'myparcel-asia'); ?></span>
+                        
+                        <!-- First Page Button («) -->
+                        <?php if ($paged > 1): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', 1)); ?>" class="mpa-page-btn mpa-page-active">«</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">«</span>
+                        <?php endif; ?>
+
+                        <!-- Previous Page Button (‹) -->
+                        <?php if ($paged > 1): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', $paged - 1)); ?>" class="mpa-page-btn mpa-page-active">‹</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">‹</span>
+                        <?php endif; ?>
+
+                        <!-- Page info text (e.g. 1 of 2) -->
+                        <span class="mpa-page-info" style="font-weight: 500; color: #1e293b; padding: 0 4px;"><?php printf(__('%d of %d', 'myparcel-asia'), $paged, $total_pages); ?></span>
+
+                        <!-- Next Page Button (›) -->
+                        <?php if ($paged < $total_pages): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', $paged + 1)); ?>" class="mpa-page-btn mpa-page-active">›</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">›</span>
+                        <?php endif; ?>
+
+                        <!-- Last Page Button (») -->
+                        <?php if ($paged < $total_pages): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', $total_pages)); ?>" class="mpa-page-btn mpa-page-active">»</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">»</span>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
 
                 <!-- Confirmation Modal -->
                 <div id="mpa-batch-awb-modal" class="mpa-modal-overlay">
@@ -4687,6 +4962,13 @@ class MyParcel_Asia_Plugin
             <?php
         } else {
             // List View
+            $reversed_batches = array_reverse($batches);
+            $total_batches = count($reversed_batches);
+            $limit = 10;
+            $total_pages = ceil($total_batches / $limit);
+            $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+            $offset = ($paged - 1) * $limit;
+            $paginated_batches = array_slice($reversed_batches, $offset, $limit);
             ?>
             <div class="wrap mpa-batch-wrap" style="font-family: 'Inter', sans-serif; margin: 20px 20px 0 0; color: #1e293b;">
                 <style>
@@ -4698,6 +4980,44 @@ class MyParcel_Asia_Plugin
                         font-size: 13px;
                         margin-top: 15px;
                     }
+                /* Custom Pagination styles to match image */
+                .mpa-page-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 4px;
+                    text-decoration: none;
+                    font-weight: 600;
+                    font-size: 14px;
+                    box-sizing: border-box;
+                    user-select: none;
+                }
+                .mpa-page-disabled {
+                    background-color: #f1f5f9;
+                    border: 1px solid #cbd5e1;
+                    color: #94a3b8;
+                    cursor: not-allowed;
+                }
+                .mpa-page-active {
+                    background-color: #ffffff;
+                    border: 1px solid #2563eb;
+                    color: #2563eb;
+                    transition: all 0.15s ease-in-out;
+                }
+                .mpa-page-active:hover {
+                    background-color: #eff6ff;
+                    border-color: #1d4ed8;
+                    color: #1d4ed8;
+                }
+                .mpa-page-info {
+                    font-size: 14px;
+                    color: #1e293b;
+                    font-weight: 500;
+                    margin: 0 4px;
+                }
+
 
                     .mpa-batch-table th,
                     .mpa-batch-table td {
@@ -4727,6 +5047,7 @@ class MyParcel_Asia_Plugin
                 <table class="mpa-batch-table">
                     <thead>
                         <tr>
+                            <th width="50" style="text-align:center;">#</th>
                             <th><?php esc_html_e('Batch Label', 'myparcel-asia'); ?></th>
                             <th><?php esc_html_e('Date Created', 'myparcel-asia'); ?></th>
                             <th><?php esc_html_e('Created By', 'myparcel-asia'); ?></th>
@@ -4737,15 +5058,20 @@ class MyParcel_Asia_Plugin
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if (empty($batches)): ?>
+                        <?php if (empty($paginated_batches)): ?>
                             <tr>
-                                <td colspan="7" style="text-align: center; color: #94a3b8; padding: 30px;">
+                                <td colspan="8" style="text-align: center; color: #94a3b8; padding: 30px;">
                                     <?php esc_html_e('No batch records found.', 'myparcel-asia'); ?>
                                 </td>
                             </tr>
                         <?php else: ?>
-                            <?php foreach (array_reverse($batches) as $b): ?>
+                            <?php 
+                            $row_count = 1;
+                            foreach ($paginated_batches as $b): 
+                                $row_index = (($paged - 1) * $limit) + $row_count;
+                                ?>
                                 <tr>
+                                    <td style="text-align:center; font-weight: 600; color: #64748b;"><?php echo $row_index; ?></td>
                                     <td style="font-weight:700; color:#4f46e5;">
                                         <?php echo esc_html($b['label']); ?>
                                     </td>
@@ -4774,10 +5100,50 @@ class MyParcel_Asia_Plugin
                                         </a>
                                     </td>
                                 </tr>
-                            <?php endforeach; ?>
+                            <?php 
+                                $row_count++;
+                            endforeach; ?>
                         <?php endif; ?>
                     </tbody>
                 </table>
+
+                <!-- Custom Pagination to match the user's mockup -->
+                <?php if ($total_batches > 0): ?>
+                    <div class="mpa-pagination-container" style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-size: 14px; color: #334155; padding-right: 10px;">
+                        <span class="mpa-pagination-total" style="margin-right: auto; color: #475569; font-weight: 500; font-size: 15px;"><?php echo esc_html($total_batches); ?> <?php _e('batches', 'myparcel-asia'); ?></span>
+                        
+                        <!-- First Page Button («) -->
+                        <?php if ($paged > 1): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', 1)); ?>" class="mpa-page-btn mpa-page-active">«</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">«</span>
+                        <?php endif; ?>
+
+                        <!-- Previous Page Button (‹) -->
+                        <?php if ($paged > 1): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', $paged - 1)); ?>" class="mpa-page-btn mpa-page-active">‹</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">‹</span>
+                        <?php endif; ?>
+
+                        <!-- Page info text (e.g. 1 of 2) -->
+                        <span class="mpa-page-info" style="font-weight: 500; color: #1e293b; padding: 0 4px;"><?php printf(__('%d of %d', 'myparcel-asia'), $paged, $total_pages); ?></span>
+
+                        <!-- Next Page Button (›) -->
+                        <?php if ($paged < $total_pages): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', $paged + 1)); ?>" class="mpa-page-btn mpa-page-active">›</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">›</span>
+                        <?php endif; ?>
+
+                        <!-- Last Page Button (») -->
+                        <?php if ($paged < $total_pages): ?>
+                            <a href="<?php echo esc_url(add_query_arg('paged', $total_pages)); ?>" class="mpa-page-btn mpa-page-active">»</a>
+                        <?php else: ?>
+                            <span class="mpa-page-btn mpa-page-disabled">»</span>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
             </div>
             <?php
         }

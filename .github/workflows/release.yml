@@ -83,6 +83,6 @@ jobs:
           
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add release/
+          git add -f release/
           git commit -m "chore: update release files [skip ci]" || echo "No changes to commit"
           git push
