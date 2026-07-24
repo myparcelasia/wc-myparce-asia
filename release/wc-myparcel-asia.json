@@ -1,13 +1,13 @@
 {
   "name": "MyParcel Asia",
   "slug": "myparcel-asia",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "author": "<a href='https://myparcelasia.com'>MyParcel Asia</a>",
-  "download_url": "https://github.com/myparcelasia/wc-myparce-asia/raw/refs/heads/main/release/myparcel-asia-1.0.7.zip",
+  "download_url": "https://github.com/myparcelasia/wc-myparce-asia/raw/refs/heads/main/release/myparcel-asia-1.0.8.zip",
   "requires": "5.0",
   "tested": "6.5",
   "sections": {
     "description": "Shipping and fulfilment plugin by MyParcel Asia.",
-    "changelog": "<h4>1.0.7</h4><ul></ul>"
+    "changelog": "<h4>1.0.8</h4><ul></ul>"
   }
 }
