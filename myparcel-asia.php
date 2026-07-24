@@ -3,7 +3,7 @@
  * Plugin Name: MYPARCEL ASIA
  * Plugin URI: https://myparcelasia.com
  * Description: WooCommerce fulfillment plugin by MYPARCEL ASIA.
- * Version: 1.0.7
+ * Version: 1.0.8
  * Author: MYPARCEL ASIA
  * Author URI: https://myparcelasia.com
  * License: GPL2
@@ -37,8 +37,6 @@ class MyParcel_Asia_Plugin
         add_action('wp_ajax_mpa_delete_batch', array($this, 'ajax_delete_batch'));
         add_action('woocommerce_checkout_create_order_shipping_item', array($this, 'save_courier_on_item_creation'), 10, 4);
         add_filter('woocommerce_package_rates', array($this, 'inject_myparcel_asia_rates'), 10, 2);
-        add_action('woocommerce_before_checkout_form', array($this, 'clear_wc_shipping_cache'));
-        add_action('woocommerce_before_cart', array($this, 'clear_wc_shipping_cache'));
         add_action('template_redirect', array($this, 'force_shipping_recalculation_on_page_load'));
         add_action('woocommerce_after_checkout_validation', array($this, 'validate_checkout_shipping_rate'), 10, 2);
 
@@ -206,6 +204,8 @@ class MyParcel_Asia_Plugin
             'sender_postcode' => $sender_postcode,
             'declared_weight' => $weight,
         );
+
+        $params['provider_code'] = $courier_key;
 
         if ($is_domestic) {
             $params['receiver_postcode'] = $receiver_postcode;
@@ -3567,6 +3567,12 @@ class MyParcel_Asia_Plugin
      */
     public function mpa_post($endpoint, $param = array())
     {
+        static $cache = array();
+        $cache_key = $endpoint . ':' . md5(wp_json_encode($param));
+        if (isset($cache[$cache_key])) {
+            return $cache[$cache_key];
+        }
+
         $host = get_option('mpa_host', 'app.myparcelasia.com');
         $url = 'https://' . $host . '/apiv2' . $endpoint;
 
@@ -3590,6 +3596,7 @@ class MyParcel_Asia_Plugin
             return new WP_Error('json_parse_error', __('Failed to parse API response.', 'myparcel-asia'));
         }
 
+        $cache[$cache_key] = $data;
         return $data;
     }
 
@@ -5336,6 +5343,13 @@ class MyParcel_Asia_Plugin
     {
         if (!class_exists('MyParcel_Asia_Shipping_Method')) {
             return $rates;
+        }
+
+        // If rates from native zone method already exist, skip duplicate API call.
+        foreach ($rates as $rate) {
+            if ($rate->get_method_id() === 'myparcel_asia_shipping') {
+                return $rates;
+            }
         }
 
         $checkout_price_option = get_option('mpa_checkout_shipping_price', 'free');

@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.8] - 2026-07-24
+### Fixed
+- Fix /check_price API now sends provider_code parameter, reducing response time from ~5s to ~1s per call.
+
 ## [1.0.7] - 2026-07-23
 ### Fixed
 - Fix AWB price missing SST value: now calculated as effective_price + sst_price from API response.
